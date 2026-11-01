@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Event {
+  id          Int      @id @default(autoincrement())
+  sourceId    Int      @unique
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+
+  exhibitors  EventExhibitor[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Exhibitor {
+  id          Int      @id @default(autoincrement())
+  sourceId    Int      @unique
+  companyName String
+  country     String?
+  squareLogo  String?
+  userId      String?
+
+  events      EventExhibitor[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EventExhibitor {
+  eventId       Int
+  exhibitorId   Int
+
+  exhibitorType String?
+  sponsorship   String?
+  boothNo       String?
+  hallNo        String?
+
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  exhibitor     Exhibitor @relation(fields: [exhibitorId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@id([eventId, exhibitorId])
+}
+model Category {
+  id                Int      @id @default(autoincrement())
+  sourceId          Int      @unique
+  categoryType      String
+  productCategoryType String
+  mainCategory      String
+  categoryName      String?
+
+  parentId          Int?
+  parent            Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children          Category[] @relation("CategoryHierarchy")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
