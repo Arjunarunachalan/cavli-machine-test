@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { randomUUID } from "crypto";
+import { getOrganizerCalendar } from "@/lib/google-calendar";
 
 const consultationSchema = z.object({
   name: z.string().trim().min(2, "Name must contain at least 2 characters"),
@@ -175,6 +177,9 @@ const bookingSchema = z.object({
 });
 
 export async function PATCH(request: NextRequest) {
+  let consultationId: number | undefined;
+  let slotReserved = false;
+
   try {
     const body: unknown = await request.json();
     const validation = bookingSchema.safeParse(body);
@@ -190,7 +195,9 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const { consultationId, scheduledAt } = validation.data;
+    const { consultationId: id, scheduledAt } = validation.data;
+    consultationId = id;
+
     const selectedDate = new Date(scheduledAt);
 
     if (selectedDate.getTime() <= Date.now()) {
@@ -200,24 +207,148 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const consultation = await prisma.consultation.update({
-      where: { id: consultationId },
-      data: { scheduledAt },
+    // Reserve the slot only if this consultation has no booking yet.
+    const reservation = await prisma.consultation.updateMany({
+      where: {
+        id,
+        scheduledAt: null,
+        calendarEventId: null,
+        status: "PENDING",
+      },
+      data: {
+        scheduledAt: selectedDate,
+      },
+    });
+
+    if (reservation.count === 0) {
+      const existing = await prisma.consultation.findUnique({
+        where: { id },
+        select: { id: true, scheduledAt: true },
+      });
+
+      if (!existing) {
+        return NextResponse.json(
+          { success: false, message: "Consultation request not found." },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          message: "This consultation already has a reserved slot.",
+        },
+        { status: 409 }
+      );
+    }
+
+    slotReserved = true;
+
+    const consultation = await prisma.consultation.findUniqueOrThrow({
+      where: { id },
+    });
+
+    // Connect to the organizer's Google Calendar.
+    const calendar = await getOrganizerCalendar();
+
+    // Create a Calendar event and request a Google Meet conference.
+    const calendarResponse = await calendar.events.insert({
+      calendarId: "primary",
+      conferenceDataVersion: 1,
+      sendUpdates: "all",
+      requestBody: {
+        summary: `Hubble Consultation - ${consultation.name}`,
+        description: [
+          `Name: ${consultation.name}`,
+          `Email: ${consultation.email}`,
+          `Phone: ${consultation.phone || "Not provided"}`,
+          `Company: ${consultation.company || "Not provided"}`,
+          "",
+          "Message:",
+          consultation.message,
+        ].join("\n"),
+        start: {
+          dateTime: selectedDate.toISOString(),
+          timeZone: "Asia/Kolkata",
+        },
+        end: {
+          dateTime: new Date(
+            selectedDate.getTime() + 30 * 60 * 1000
+          ).toISOString(),
+          timeZone: "Asia/Kolkata",
+        },
+        attendees: [{ email: consultation.email }],
+        conferenceData: {
+          createRequest: {
+            requestId: randomUUID(),
+            conferenceSolutionKey: {
+              type: "hangoutsMeet",
+            },
+          },
+        },
+      },
+    });
+
+
+
+    const calendarEventId = calendarResponse.data.id;
+
+    if (!calendarEventId) {
+      throw new Error("Google Calendar did not return an event ID.");
+    }
+
+    const meetLink =
+      calendarResponse.data.hangoutLink ||
+      calendarResponse.data.conferenceData?.entryPoints?.find(
+        (entry) => entry.entryPointType === "video"
+      )?.uri ||
+      null;
+
+    // Save the Calendar event and Meet link in PostgreSQL.
+    const updatedConsultation = await prisma.consultation.update({
+      where: { id },
+      data: {
+        calendarEventId,
+        meetLink,
+        status: "CONFIRMED",
+      },
       select: {
         id: true,
         name: true,
         email: true,
         scheduledAt: true,
         status: true,
+        calendarEventId: true,
+        meetLink: true,
       },
     });
 
     return NextResponse.json({
       success: true,
-      message: "Appointment slot reserved successfully.",
-      data: consultation,
+      message: "Consultation booked successfully.",
+      data: updatedConsultation,
     });
   } catch (error) {
+    console.error("Appointment booking failed:", error);
+
+    // Release the slot if Calendar creation or database saving fails.
+    if (slotReserved && consultationId !== undefined) {
+      try {
+        await prisma.consultation.updateMany({
+          where: {
+            id: consultationId,
+            calendarEventId: null,
+          },
+          data: {
+            scheduledAt: null,
+            status: "PENDING",
+          },
+        });
+      } catch (rollbackError) {
+        console.error("Failed to release reserved slot:", rollbackError);
+      }
+    }
+
     if (
       error &&
       typeof error === "object" &&
@@ -233,12 +364,10 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    console.error("Appointment booking failed:", error);
-
     return NextResponse.json(
       {
         success: false,
-        message: "Unable to reserve this appointment.",
+        message: "Unable to complete your booking. Please try again.",
       },
       { status: 500 }
     );

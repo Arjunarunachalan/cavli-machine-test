@@ -91,3 +91,10 @@ model Consultation {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 }
+model GoogleCalendarCredential {
+  id           String   @id @default("organizer")
+  email        String?
+  refreshToken String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
