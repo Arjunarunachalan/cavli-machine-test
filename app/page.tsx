@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { products } from "@/lib/data/products";
 import { getExhibitorData } from "@/lib/data/exhibitors";
+import ConsultationForm from "@/components/consultation-form";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
@@ -235,9 +236,9 @@ export default async function Home() {
             discover the right solution for your project.
           </p>
 
-          <p className="mt-8 text-orange-400">
-            Consultation booking form coming next.
-          </p>
+        <div className="mt-12">
+  <ConsultationForm />
+</div>
         </div>
       </section>
 

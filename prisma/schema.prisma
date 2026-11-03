@@ -66,3 +66,28 @@ model Category {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
+
+enum ConsultationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  FAILED
+}
+
+model Consultation {
+  id              Int                 @id @default(autoincrement())
+  name            String
+  email           String
+  phone           String?
+  company         String?
+  message         String
+
+  scheduledAt     DateTime?           @unique
+  status          ConsultationStatus @default(PENDING)
+
+  calendarEventId String?             @unique
+  meetLink        String?
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
