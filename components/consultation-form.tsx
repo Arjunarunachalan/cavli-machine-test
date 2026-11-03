@@ -15,6 +15,25 @@ interface ApiResponse {
   success: boolean;
   message: string;
   errors?: Record<string, string[] | undefined>;
+  data?: {
+    id: number;
+    name: string;
+    email: string;
+    status: string;
+    createdAt: string;
+  };
+}
+
+interface AvailableSlot {
+  start: string;
+  label: string;
+}
+
+interface SlotsResponse {
+  success: boolean;
+  timezone: string;
+  durationMinutes: number;
+  slots: AvailableSlot[];
 }
 
 const initialForm: FormData = {
@@ -33,6 +52,11 @@ export default function ConsultationForm() {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [consultationId, setConsultationId] = useState<number | null>(null);
+const [slots, setSlots] = useState<AvailableSlot[]>([]);
+const [selectedSlot, setSelectedSlot] = useState("");
+const [slotsLoading, setSlotsLoading] = useState(false);
+const [bookingLoading, setBookingLoading] = useState(false);
 
   function handleChange(
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -50,78 +74,162 @@ export default function ConsultationForm() {
     }));
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
 
-    setErrors({});
-    setFeedback(null);
+  setErrors({});
+  setFeedback(null);
 
-    const nextErrors: Record<string, string> = {};
+  const nextErrors: Record<string, string> = {};
 
-    if (form.name.trim().length < 2) {
-      nextErrors.name = "Please enter your name.";
-    }
+  if (form.name.trim().length < 2) {
+    nextErrors.name = "Please enter your name.";
+  }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-      nextErrors.email = "Please enter a valid email address.";
-    }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+    nextErrors.email = "Please enter a valid email address.";
+  }
 
-    if (!form.message.trim()) {
-      nextErrors.message = "Please enter your message.";
-    }
+  if (!form.message.trim()) {
+    nextErrors.message = "Please enter your message.";
+  }
 
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
-      return;
-    }
+  if (Object.keys(nextErrors).length > 0) {
+    setErrors(nextErrors);
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
-    try {
-      const response = await fetch("/api/consult", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(form),
-      });
+  try {
+    // 1. Save the consultation details.
+    const response = await fetch("/api/consult", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(form),
+    });
 
-      const result: ApiResponse = await response.json();
+    const result: ApiResponse = await response.json();
 
-      if (!response.ok || !result.success) {
-        if (result.errors) {
-          const serverErrors: Record<string, string> = {};
+    if (!response.ok || !result.success || !result.data?.id) {
+      if (result.errors) {
+        const serverErrors: Record<string, string> = {};
 
-          Object.entries(result.errors).forEach(([field, messages]) => {
-            if (messages?.[0]) {
-              serverErrors[field] = messages[0];
-            }
-          });
+        Object.entries(result.errors).forEach(([field, messages]) => {
+          if (messages?.[0]) {
+            serverErrors[field] = messages[0];
+          }
+        });
 
-          setErrors(serverErrors);
-        }
-
-        throw new Error(result.message || "Submission failed.");
+        setErrors(serverErrors);
       }
 
-      setFeedback({
-        type: "success",
-        message: "Your consultation request was submitted successfully!",
-      });
-
-      setForm(initialForm);
-    } catch (error) {
-      setFeedback({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Something went wrong. Please try again.",
-      });
-    } finally {
-      setLoading(false);
+      throw new Error(result.message || "Submission failed.");
     }
+
+    // 2. Store the consultation ID for booking.
+    setConsultationId(result.data.id);
+
+    // 3. Retrieve available appointment slots.
+    setSlotsLoading(true);
+
+    const slotsResponse = await fetch("/api/consult", {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    const slotsResult: SlotsResponse = await slotsResponse.json();
+
+    if (!slotsResponse.ok || !slotsResult.success) {
+      throw new Error("Your request was saved, but available slots could not be loaded. Please try again.");
+    }
+
+    setSlots(slotsResult.slots);
+
+    setFeedback({
+      type: "success",
+      message: "Your details have been saved. Please select an appointment time.",
+    });
+  } catch (error) {
+    setFeedback({
+      type: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again.",
+    });
+  } finally {
+    setLoading(false);
+    setSlotsLoading(false);
   }
+}
+
+async function handleBooking() {
+  if (!consultationId || !selectedSlot) {
+    setFeedback({
+      type: "error",
+      message: "Please select an appointment time.",
+    });
+    return;
+  }
+
+  setBookingLoading(true);
+  setFeedback(null);
+
+  try {
+    const response = await fetch("/api/consult", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        consultationId,
+        scheduledAt: selectedSlot,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      if (response.status === 409) {
+        const slotsResponse = await fetch("/api/consult", {
+          cache: "no-store",
+        });
+        const slotsResult: SlotsResponse = await slotsResponse.json();
+
+        if (slotsResponse.ok && slotsResult.success) {
+          setSlots(slotsResult.slots);
+        }
+      }
+
+      throw new Error(result.message || "Unable to book this appointment.");
+    }
+
+    setFeedback({
+      type: "success",
+      message: `Your appointment is reserved for ${new Intl.DateTimeFormat(
+        "en-IN",
+        {
+          dateStyle: "full",
+          timeStyle: "short",
+          timeZone: "Asia/Kolkata",
+        }
+      ).format(new Date(selectedSlot))}.`,
+    });
+  } catch (error) {
+    setFeedback({
+      type: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again.",
+    });
+  } finally {
+    setBookingLoading(false);
+  }
+}
 
   const inputClass =
     "mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-100";
@@ -228,6 +336,53 @@ export default function ConsultationForm() {
             <p className="mt-1 text-sm text-red-600">{errors.message}</p>
           )}
         </div>
+        
+        {consultationId !== null && (
+  <div className="space-y-4 rounded-2xl border border-gray-200 bg-gray-50 p-5">
+    <div>
+      <h4 className="text-lg font-semibold text-gray-900">
+        Choose an appointment time
+      </h4>
+      <p className="mt-1 text-sm text-gray-500">
+        Select a convenient 30-minute slot. All times are in Indian Standard Time (IST).
+      </p>
+    </div>
+
+    {slotsLoading ? (
+      <p className="text-sm text-gray-500">Loading available slots...</p>
+    ) : slots.length === 0 ? (
+      <p className="text-sm text-gray-500">
+        No available slots found. Please try again later.
+      </p>
+    ) : (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {slots.map((slot) => (
+          <button
+            key={slot.start}
+            type="button"
+            onClick={() => setSelectedSlot(slot.start)}
+            className={`rounded-xl border px-3 py-3 text-sm font-medium transition ${
+              selectedSlot === slot.start
+                ? "border-orange-600 bg-orange-600 text-white"
+                : "border-gray-200 bg-white text-gray-700 hover:border-orange-400"
+            }`}
+          >
+            {slot.label}
+          </button>
+        ))}
+      </div>
+    )}
+
+    <button
+      type="button"
+      onClick={handleBooking}
+      disabled={!selectedSlot || bookingLoading || slotsLoading}
+      className="w-full rounded-full bg-gray-950 px-6 py-3 font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {bookingLoading ? "Confirming appointment..." : "Confirm appointment"}
+    </button>
+  </div>
+)}
 
         {feedback && (
           <div
