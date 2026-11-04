@@ -1,4 +1,3 @@
-
 # Hubble — CavliWireless Web Developer Machine Test
 
 A full-stack Next.js application built for the CavliWireless Web Developer machine test. The project combines a Hubble product showcase, interactive 3D product visualization, an MMI exhibitor data scraper, PostgreSQL persistence, and Google Calendar consultation booking.
@@ -38,8 +37,8 @@ The application consists of two main tasks sharing a PostgreSQL database.
 - Interactive 3D GLB model viewer with rotation and zoom.
 - Exhibitor information retrieved from PostgreSQL.
 - Consultation request form with appointment scheduling.
-- Google Calendar event creation and Google Meet link generation.
-- Calendar invitation sent to the customer through Google Calendar.
+- Google Calendar event creation with a request to generate a Google Meet link.
+- Google Calendar invitation requested for the customer's email address.
 
 ### Task 2 — MMI Exhibitor Scraper
 
@@ -500,7 +499,7 @@ This avoids storing event or company details repeatedly in association records.
 
 This separation reduces update anomalies and unnecessary duplication.
 
-**Source-data limitation:** The imported category data is stored independently because the source integration does not provide a reliable exhibitor-category association in the retrieved data. Parent category relationships are represented through `parentId` when a reliable parent reference is available.
+****Source-data limitation:** The imported category data is stored independently because the source integration does not provide a reliable exhibitor-category association in the retrieved data. The schema supports self-referencing category relationships through `parentId`, but the retrieved dataset did not provide reliable parent references. Therefore, imported categories currently have `parentId` set to `null`.
 
 ---
 
